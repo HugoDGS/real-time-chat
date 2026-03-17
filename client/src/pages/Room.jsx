@@ -8,7 +8,9 @@ export default function Room() {
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
   const [text, setText] = useState('');
+  const [typing, setTyping] = useState([]);
   const messagesEndRef = useRef(null);
+  const typingTimer = useRef(null);
   const username = sessionStorage.getItem('username');
 
   useEffect(() => {
@@ -22,16 +24,23 @@ export default function Room() {
     const onJoined = ({ users }) => setUsers(users);
     const onLeft = ({ users }) => setUsers(users);
 
+    const onTyping = ({ username: u }) => setTyping((t) => [...new Set([...t, u])]);
+    const onStopTyping = ({ username: u }) => setTyping((t) => t.filter((x) => x !== u));
+
     socket.on('room-history', onHistory);
     socket.on('new-message', onMessage);
     socket.on('user-joined', onJoined);
     socket.on('user-left', onLeft);
+    socket.on('user-typing', onTyping);
+    socket.on('user-stop-typing', onStopTyping);
 
     return () => {
       socket.off('room-history', onHistory);
       socket.off('new-message', onMessage);
       socket.off('user-joined', onJoined);
       socket.off('user-left', onLeft);
+      socket.off('user-typing', onTyping);
+      socket.off('user-stop-typing', onStopTyping);
     };
   }, [username, navigate]);
 
@@ -42,7 +51,16 @@ export default function Room() {
   const send = () => {
     if (!text.trim()) return;
     socket.emit('send-message', { roomId, text: text.trim() });
+    socket.emit('stop-typing', { roomId });
+    clearTimeout(typingTimer.current);
     setText('');
+  };
+
+  const handleInput = (e) => {
+    setText(e.target.value);
+    socket.emit('typing', { roomId });
+    clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => socket.emit('stop-typing', { roomId }), 1500);
   };
 
   const leave = () => {
@@ -93,6 +111,11 @@ export default function Room() {
               </div>
             )
           )}
+          {typing.filter((u) => u !== username).length > 0 && (
+            <p className="typing-indicator">
+              {typing.filter((u) => u !== username).join(', ')} is typing...
+            </p>
+          )}
           <div ref={messagesEndRef} />
         </div>
 
@@ -100,7 +123,7 @@ export default function Room() {
           <input
             className="chat-input"
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={handleInput}
             onKeyDown={(e) => e.key === 'Enter' && send()}
             placeholder="Type a message..."
             autoFocus
